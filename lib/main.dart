@@ -1,5 +1,9 @@
+import 'dart:io' show Platform;
+import 'dart:math' as math;
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'ball_detector.dart';
 import 'frame_preprocessor.dart';
@@ -8,6 +12,9 @@ import 'tap_detector.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // The overlay and frame geometry assume an upright portrait screen.
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
   final cameras = await availableCameras();
 
@@ -84,11 +91,16 @@ class _CameraScreenState extends State<CameraScreen> {
       orElse: () => widget.cameras.first,
     );
 
+    // Needed by the Android (YUV) path to rotate frames upright.
+    _preprocessor.sensorOrientation = camera.sensorOrientation;
+
     final controller = CameraController(
       camera,
       ResolutionPreset.medium,
       enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.bgra8888,
+      imageFormatGroup: Platform.isAndroid
+          ? ImageFormatGroup.yuv420
+          : ImageFormatGroup.bgra8888,
     );
 
     try {
@@ -103,7 +115,6 @@ class _CameraScreenState extends State<CameraScreen> {
         _controller = controller;
         _status = 'Camera ready';
       });
-
     } catch (e) {
       debugPrint('Camera initialization failed: $e');
 
@@ -193,10 +204,13 @@ class _CameraScreenState extends State<CameraScreen> {
     _isStarting = false;
     if (!mounted) return;
 
-    // Portrait frame aspect = previewSize.height / previewSize.width
-    // (previewSize is reported in landscape).
+    // Portrait frame aspect = short side / long side of the preview size.
+    // min/max makes this independent of whether previewSize is reported
+    // as landscape or portrait.
     final ps = controller.value.previewSize!;
-    _tapDetector = TapDetector(aspect: ps.height / ps.width);
+    final shortSide = math.min(ps.width, ps.height);
+    final longSide = math.max(ps.width, ps.height);
+    _tapDetector = TapDetector(aspect: shortSide / longSide);
 
     _frameIndex = 0;
     _isRunning = true;
@@ -353,90 +367,95 @@ class _CameraScreenState extends State<CameraScreen> {
     }
 
     final screen = MediaQuery.of(context).size;
+    final ps = controller.value.previewSize!;
+    // Portrait preview: width = short side, height = long side.
+    final previewW = math.min(ps.width, ps.height);
+    final previewH = math.max(ps.width, ps.height);
 
     return Scaffold(
       body: GestureDetector(
         onTapDown: (d) => _tapToFocus(d, screen),
         child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Center(
-            child: FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
-                width: controller.value.previewSize!.height,
-                height: controller.value.previewSize!.width,
-                child: Stack(
-                  children: [
-                    CameraPreview(controller),
-                    Positioned.fill(
-                      child: CustomPaint(
-                        painter: OverlayPainter(
-                          leftAnkle: _leftAnkle,
-                          rightAnkle: _rightAnkle,
-                          ball: _ball,
+          fit: StackFit.expand,
+          children: [
+            Center(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: previewW,
+                  height: previewH,
+                  child: Stack(
+                    children: [
+                      CameraPreview(controller),
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: OverlayPainter(
+                            leftAnkle: _leftAnkle,
+                            rightAnkle: _rightAnkle,
+                            ball: _ball,
+                          ),
                         ),
                       ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 50,
+              left: 20,
+              right: 20,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Toe Taps: $_tapCount',
+                      style: TextStyle(
+                        color: _tapFlash ? Colors.greenAccent : Colors.white,
+                        fontSize: 34,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _status,
+                      textAlign: TextAlign.center,
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 14),
                     ),
                   ],
                 ),
               ),
             ),
-          ),
-          Positioned(
-            top: 50,
-            left: 20,
-            right: 20,
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.65),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+            Positioned(
+              bottom: 40,
+              left: 20,
+              right: 20,
+              child: Row(
                 children: [
-                  Text(
-                    'Toe Taps: $_tapCount',
-                    style: TextStyle(
-                      color: _tapFlash ? Colors.greenAccent : Colors.white,
-                      fontSize: 34,
-                      fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _isLoadingModel ? null : _startDetection,
+                      child: const Text('START'),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _status,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white70, fontSize: 14),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _resetDetection,
+                      child: const Text('RESET'),
+                    ),
                   ),
                 ],
               ),
             ),
-          ),
-          Positioned(
-            bottom: 40,
-            left: 20,
-            right: 20,
-            child: Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _isLoadingModel ? null : _startDetection,
-                    child: const Text('START'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _resetDetection,
-                    child: const Text('RESET'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+          ],
         ),
       ),
     );

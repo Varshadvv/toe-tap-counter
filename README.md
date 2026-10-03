@@ -4,7 +4,7 @@ A Flutter app that counts toe taps on a football in real time. It reads the live
 
 Camera -> Preprocess -> YOLO Pose(ankles) + YOLO Detect (ball) -> Tap Detection -> Counter
 
-   Features
+  Features
 
 - Live camera preview with an overlay (green dot: left ankle, red dot: right ankle, orange box: ball)
 - On-device inference with TensorFlow Lite (no network needed)
@@ -124,7 +124,7 @@ Tested by performing taps in front of the phone and comparing the on-screen coun
 
 | Test | Real taps | App count | Accuracy | Notes |
 |------|-----------|-----------|----------|-------|
-| Slow taps | 6 | 6 | 100% | Every tap counted, no double counts. |
+| Slow taps | 5 | 5 | 100% | Every tap counted, no double counts. |
 | Fast taps | 40 | 34 | 85% | Undercounted by 6, no extra counts. At 6-10 FPS a fast tap spans only 1-2 processed frames. |
 
 - Device used: iPhone 17
